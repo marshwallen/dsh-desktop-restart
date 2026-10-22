@@ -193,34 +193,9 @@ await ok('host 半声明 webServer 依赖', async () => {
   assert.deepEqual(hostHalf.inject, ['webServer'])
 })
 
-await ok('斜杠命令：注册了 /restart-desktop', async () => {
-  assert.equal(commands.length, 1, '应当恰好注册一个命令')
-  assert.equal(commands[0].name, 'restart-desktop')
-  assert.ok(commands[0].description.length > 0, '描述不能为空')
-  assert.equal(typeof commands[0].handler, 'function')
-})
-
-await ok('斜杠命令：非桌面宿主下返回 error 结果', async () => {
-  const result = await commands[0].handler({})
-  assert.equal(result.kind, 'error')
-  assert.match(result.text, /桌面版/u)
-})
-
-await ok('斜杠命令：--force 不会绕过「不是桌面版」这类硬拒绝', async () => {
-  const result = await commands[0].handler({ rawInput: '--force' })
-  assert.equal(result.kind, 'error')
-  assert.match(result.text, /桌面版/u)
-})
-
-await ok('斜杠命令：invocation 形状意外时不抛异常', async () => {
-  for (const input of [undefined, null, 'plain string', { rawInput: 42 }, { rawInput: '' }]) {
-    const result = await commands[0].handler(input)
-    assert.equal(result.kind, 'error')
-  }
-})
-
-await ok('斜杠命令：命令名符合 DSH 的命名规则', async () => {
-  assert.match(commands[0].name, /^[a-z][a-z0-9_-]*$/u)
+await ok('仅保留侧栏入口：即使旧配置开启 command，也不注册斜杠命令', async () => {
+  hostHalf.apply(ctx, { sweep: false, command: true, header: true, panel: true, settingsRow: true })
+  assert.equal(commands.length, 0)
 })
 
 await ok('状态路由：GET 返回 desktop=false（当前不是桌面宿主）', async () => {
@@ -468,7 +443,7 @@ await ok('守卫：记录里的进程已经退出 = 崩溃残留（不拦，避�
 await ok('守卫：存活判据照抄上游（process.kill(pid, 0) 不抛就算活着）', async () => {
   assert.equal(__test.runAlive({ pid: process.pid }), true)
   // grouped：Windows 忽略进程组（探测目标就是 pid 本身）；POSIX 上探测 -pid
-  // （整个进程组）。CI 三档矩阵里 Linux 与 Windows 都会跑到这条 ——
+  // （整个进程组）。CI 矩阵里 Linux 与 Windows 都会跑到这条 ——
   // 断言必须跟着平台走，不能再把「Windows 的行为」写死成全平台的事实
   // （2026-10-20 CI 首跑 Linux 三连红就是这么来的）。
   if (process.platform === 'win32') {
@@ -1115,17 +1090,10 @@ await ok('client bundle：确认态与警告态是两条不同的路（force 只
   assert.match(source, /result\.guard === true/u, '必须识别宿主半的守卫响应')
 })
 
-await ok('client bundle：等空闲再重启 —— wait/cancelWait 走通、按钮只在守卫响着时出现（B 项）', async () => {
+await ok('client bundle：等待 API 仍支持 wait/cancelWait（B 项）', async () => {
   const source = readFileSync(join(libDir, 'client.js'), 'utf8')
   assert.match(source, /wait=1/u, '等待请求必须带 wait=1')
   assert.match(source, /cancelWait=1/u, '取消请求必须带 cancelWait=1')
-  assert.match(source, /function WaitButton/u, '必须有等待按钮组件')
-  // 按钮出现条件：守卫响着（guardHint 非空）或已挂起等待；非桌面版不出现。
-  const start = source.indexOf('function WaitButton')
-  const fn = source.slice(start, source.indexOf('\n\t\t\t}', start) + 4)
-  assert.ok(fn.length > 200, `WaitButton 函数体要完整截取到（现在 ${String(fn.length)} 字符）`)
-  assert.match(fn, /guardHint === ""/u, '要判断守卫是否响着')
-  assert.match(fn, /desktop === false.*?return null/us, '非桌面版不显示')
   // 等待与取消都换状态行而不进 done（等待不是「已排程重启」）。
   assert.match(source, /result\.waiting === true/u, '客户端要识别宿主的等待挂起响应')
   assert.match(source, /waitForIdle/u, 'useRestart 必须暴露 waitForIdle')
@@ -1178,16 +1146,6 @@ await ok('client bundle：字典 zh/en 两表键一致，代码引用的键全�
   assert.ok(used.length > 40, `t() 引用应当覆盖几乎全部文案（现在 ${String(used.length)} 个）`)
   const missing = [...new Set(used)].filter((k) => !zhSet.has(k))
   assert.deepEqual(missing, [], `t() 引用了字典里不存在的键：${missing.join(', ')}`)
-  // 间接引用：ENTRY_LABELS 与 DEFAULT_HINT_KEY / hostMessage 的 fallbackKey。
-  // 只认 ENTRY_LABELS 那张表里的键对（锚定它后面的 t(copy[N])），否则
-  // inject: ["slots", "locale"] 这类服务名数组也会被这个形状误抓
-  // （0.4.1 首跑就这么红的 —— 服务声明不是字典键）。
-  const entryBlock = /const ENTRY_LABELS = \{([\s\S]*?)\n\t\t\}/.exec(source)
-  assert.ok(entryBlock, '必须保留 ENTRY_LABELS 表（四个入口的标题/说明键）')
-  const entryKeys = [...entryBlock[1].matchAll(/\["([A-Za-z0-9_]+)",\s*"([A-Za-z0-9_]+)"\]/g)].flatMap((m) => [m[1], m[2]])
-  assert.ok(entryKeys.length === 8, `ENTRY_LABELS 应有 4 行 × 2 键（现在 ${String(entryKeys.length)}）`)
-  const entryMissing = entryKeys.filter((k) => !zhSet.has(k))
-  assert.deepEqual(entryMissing, [], `ENTRY_LABELS 引用了不存在的键：${entryMissing.join(', ')}`)
   for (const key of ['defaultHint', 'blockedFallback', 'guardFallback', 'sweepLastPrefix', 'sweepJustNow', 'extrasSubtitle']) {
     assert.ok(zhSet.has(key), `间接引用的键必须存在：${key}`)
   }
@@ -1252,32 +1210,15 @@ await ok('client bundle：自己注入样式，且重复加载不重复插入', 
   assert.match(source, /\.dshdr-/u, '选择器必须自带前缀，不能影响别的插件')
 })
 
-await ok('client bundle：标题栏按钮照抄官方座位里的真实按钮（ui-jobs JobListAction）', async () => {
+await ok('client bundle：移除旧重启组件及入口开关', async () => {
   const source = readFileSync(join(libDir, 'client.js'), 'utf8')
-  // 数值逐字取自 packages/client/ui-jobs/src/client/JobListAction.module.css 的 .trigger
-  // —— 它就是会话标题栏 conversation.session.header.actions 座位里的真实按钮。
-  for (const token of [
-    'min-height:28px',
-    'padding:3px 2px',
-    'gap:3px',
-    '--dsw-radius-sm',
-    'line-height:18px',
-    '--dsw-alias-label-tertiary',
-    '@container (width<=540px)',
-  ]) {
-    assert.ok(source.includes(token), `缺少与官方标题栏动作一致的 ${token}`)
-  }
-  assert.match(
-    source,
-    /\.dshdr-trigger:hover:not\(:disabled\),\.dshdr-trigger:focus-visible\{color:var\(--dsw-alias-label-secondary/u,
-    '官方 hover / focus 只把字色提到 label-secondary，不加任何底色',
-  )
+  assert.doesNotMatch(source, /function (HeaderRestartButton|SettingsRestartRow|RestartPanel|PanelGlyph)|ENTRY_KEYS|ENTRY_LABELS|writeStoredEntry/u)
 })
 
 await ok('client bundle：忙碌时有旋转动画，并尊重系统的减少动效', async () => {
   const source = readFileSync(join(libDir, 'client.js'), 'utf8')
   assert.match(source, /@keyframes dshdr-spin/u)
-  assert.match(source, /data-busy=1/u)
+  assert.match(source, /data-busy='1'/u)
   assert.match(source, /prefers-reduced-motion:reduce/u)
 })
 
@@ -1314,13 +1255,13 @@ await ok('client bundle：aria-label 绝不放动态提示（皮肤插件会把�
   assert.doesNotMatch(body, /ariaWithGuard/u, '拼长句的那个键已废弃')
   // 提示改走 aria-describedby，且目标是一段视觉隐藏文本
   assert.match(source, /function ariaDescriptionOf/u, '必须有独立的详细提示函数')
-  assert.match(source, /"aria-describedby": described === "" \? undefined : hintId/u, '两个常驻按钮都要接 describedby')
+  assert.match(source, /"aria-describedby": described === "" \? undefined : hintId/u, '常驻按钮要接 describedby')
   assert.match(source, /className: "dshdr-sr-only"/u, 'describedby 的目标必须是视觉隐藏文本')
   assert.match(source, /\.dshdr-sr-only\{position:absolute;[^}]*clip:rect/u, 'sr-only 样式必须真的把它藏掉')
   // 提示不许进按钮的 textContent（皮肤插件在 aria-label 缺失时也会读它）
-  const headerAt = source.indexOf('function HeaderRestartButton')
-  const headerBody = source.slice(headerAt, source.indexOf('function SettingsRestartRow', headerAt))
-  assert.match(headerBody, /described !== "" && React\.createElement\("span", \{ id: hintId/u, '隐藏提示是按钮的兄弟节点，不在按钮里面')
+  const footerAt = source.indexOf('function SidebarRestartAction')
+  const footerBody = source.slice(footerAt, source.indexOf('function HideContactRow', footerAt))
+  assert.match(footerBody, /described !== "" && React\.createElement\("span", \{ id: hintId/u, '隐藏提示是按钮的兄弟节点，不在按钮里面')
 })
 
 await ok('client bundle：无障碍文案压到 4 字以内（皮肤插件会把它当行标题显示）', async () => {
@@ -1347,26 +1288,10 @@ await ok('client bundle：无障碍文案压到 4 字以内（皮肤插件会把
   }
 })
 
-await ok('client bundle：主区面板按同座位（任务看板）的页面版式排', async () => {
+await ok('client bundle：唯一按钮排在更多之后，且只调整本插件所在容器', async () => {
   const source = readFileSync(join(libDir, 'client.js'), 'utf8')
-  // 2026-10-20 用户反馈：点左上角进去那页「布局有问题」——内容是 32/24 内边距
-  // 的 560px 窄栏浮在满高主区里。原生版式（任务看板 [data-dsh-taskboard-view]）
-  // 是：铺满高度 + bg-base + 14/16 内边距 + 标题 16px/700 与右侧工具同一行。
-  assert.match(source, /\.dshdr-panel\{[^}]*height:100%[^}]*\}/u, '面板要铺满主区高度')
-  assert.match(source, /\.dshdr-panel\{[^}]*background:var\(--dsw-alias-bg-base/u, '面板要自带 bg-base，别让底色透出')
-  assert.match(source, /\.dshdr-panel\{[^}]*padding:14px 16px 16px/u, '内边距要与任务看板一致（14/16）')
-  assert.doesNotMatch(source, /\.dshdr-panel\{[^}]*max-width:560px/u, '不该再用 560px 窄栏')
-  assert.doesNotMatch(source, /\.dshdr-panel\{[^}]*margin:0 auto/u, '窄栏居中会让内容浮在页面中间')
-  assert.match(source, /\.dshdr-panel-title\{[^}]*font-weight:700/u, '标题字重照原生（700，不是 500）')
-  // 标题与状态同一行
-  assert.match(source, /\.dshdr-panel-header\{[^}]*align-items:center/u, '标题行要横向排列')
-  assert.match(source, /\.dshdr-panel-status\{[^}]*margin-left:auto/u, '状态词靠右')
-  assert.match(source, /function statusOf\(action\)/u, '要有状态词函数')
-  // 说明 / 警告 / 结果都是卡片，而不是一行灰字
-  assert.match(source, /\.dshdr-panel-warn\{[^}]*border:1px solid[^}]*border-radius:12px/u, '警告块要卡片化')
-  assert.match(source, /\.dshdr-panel-note\{[^}]*border:1px solid[^}]*border-radius:12px/u, '结果块要卡片化')
-  // 守卫提示单独成块，不再拼进说明里
-  assert.match(source, /const guardWarn = action\.guardHint === ""/u, '守卫提示要单独成一块')
+  assert.ok(source.includes('[class*=\\"footerActions\\"]:has(.dshdr-foot){display:contents !important}'))
+  assert.match(source, /\.dshdr-foot\{order:1;/u)
 })
 
 await ok('client bundle：重启完成回执接进界面（2026-10-21）', async () => {
@@ -1376,10 +1301,7 @@ await ok('client bundle：重启完成回执接进界面（2026-10-21）', async
   assert.match(source, /function restartReceiptText/u, '要有回执文案函数')
   assert.match(source, /restartReceipt: "已于 \{time\} 完成重启/u, '中文文案在字典里')
   assert.match(source, /restart, armed, press, refresh, waitForIdle, cancelWait/u, 'useRestart 要 expose restart')
-  // 主区面板里显示一行
-  assert.match(source, /action\.restart !== null && React\.createElement\("p", \{ className: "dshdr-panel-note" \}, restartReceiptText/u, '面板要显示回执行')
-  // 设置行：没有别的提示时优先显示回执，而不是干巴巴的默认说明
-  assert.match(source, /action\.restart !== null \? restartReceiptText\(action\.restart\) : t\(DEFAULT_HINT_KEY\)/u, '设置行优先显示回执')
+  assert.match(source, /action\.restart !== null \? restartReceiptText\(action\.restart\)/u, '唯一按钮的提示要保留回执')
 })
 
 await ok('client bundle：续跑开关在设置里，默认关、写明会花 token（2026-10-21）', async () => {
@@ -1417,7 +1339,8 @@ await ok('client bundle：直接用官方组件，且取不到时有兜底', asy
 await ok('package.json：client.inject 声明了官方组件库', async () => {
   const inject = packageJson.dsh.client.inject
   assert.ok(inject.includes('@deepseek-ai/dsh-client-ui-primitives'), '必须在 inject 里声明，加载器才会先注册它')
-  assert.ok(inject.includes('@deepseek-ai/dsh-client-ui-conversation'), '标题栏座位来自这个包')
+  assert.ok(inject.includes('@deepseek-ai/dsh-client-ui-sidebar'), '侧栏座位来自这个包')
+  assert.ok(!inject.includes('@deepseek-ai/dsh-client-ui-conversation'))
 })
 
 await ok('文档：英文 README 存在、进包、且与中文版互相链接（issue #1 的延伸）', async () => {
@@ -1435,129 +1358,36 @@ await ok('文档：英文 README 存在、进包、且与中文版互相链接�
   assert.ok(packageJson.files.includes('README.en.md'), 'files 必须包含 README.en.md，否则 npm 包里没有它')
 })
 
-await ok('client bundle：两个侧栏入口用短名字，设置分区与页面标题保留全名', async () => {
-  const { plugin } = loadClientBundle()
+await ok('client bundle：仅注册侧栏按钮和无重启按钮的设置分区，忽略旧入口偏好', async () => {
+  const store = new Map([['dsh-desktop-restart.entries', JSON.stringify({
+    panel: true, footer: false, header: true, settingsRow: true,
+  })]])
+  const { plugin } = loadClientBundle({ storage: { getItem: (key) => store.get(key) ?? null } })
   const registered = []
+  const cleanups = []
+  const removed = []
   const slots = {
-    inject: (name, fn) => { fn() },
-    register: (options) => { registered.push(options); return () => {} },
-  }
-  plugin.apply({
-    get: (key) => (key === 'slots' ? slots : undefined),
-    effect: (fn) => fn(),
-  })
-  const labelOfEntry = (entry) => (typeof entry.label === 'function' ? entry.label() : entry.label)
-  const panel = registered.find((entry) => entry.name === 'sidebar.panellist')
-  const foot = registered.find((entry) => entry.name === 'sidebar.footer.action')
-  const section = registered.find((entry) => entry.name === 'settings.section')
-  assert.ok(panel !== undefined && foot !== undefined && section !== undefined, '三个座位都要注册')
-  // 2026-10-20 用户：侧栏左上角那一条的名字也要短。侧栏行窄、收起或
-  // 被第三方皮肤镜像时更容易被挤长，所以入口用 4 字，分区/标题留全名。
-  for (const [name, entry] of [['左上角入口', panel], ['侧栏底部入口', foot]]) {
-    assert.equal(labelOfEntry(entry), '重启应用', `${name}应当用短名字`)
-  }
-  assert.equal(labelOfEntry(section), '重启桌面应用', '设置分区标题保留全名')
-})
-
-await ok('会话标题栏：必须排在后台任务条目（order 20）之前', async () => {
-  const { plugin } = loadClientBundle()
-  const registered = []
-  const slots = {
-    inject: (name, fn) => { fn() },
-    register: (options) => {
-      registered.push(options)
-      return () => {}
+    inject: (name, fn) => fn(),
+    register: (options, component) => {
+      registered.push({ ...options, component })
+      return () => removed.push(options.name)
     },
   }
   plugin.apply({
-    get: (key) => (key === 'slots' ? slots : undefined),
-    effect: (fn) => fn(),
+    get: (key) => key === 'slots' ? slots : undefined,
+    effect: (fn) => { const dispose = fn(); if (typeof dispose === 'function') cleanups.push(dispose) },
   })
-  const header = registered.find((entry) => entry.name === 'conversation.session.header.actions')
-  assert.ok(header !== undefined, '必须注册会话标题栏条目')
-  assert.equal(typeof header.order, 'number', '标题栏条目必须显式声明 order')
-  assert.ok(
-    header.order < 20,
-    '标题栏动作组是左紧排的：排在内置 jobs 条目（order 20）之后，'
-      + '后台任务一跑起来本按钮就会被「N 个后台任务」往右顶走一截'
-      + `（2026-10-06 实测 134px）。当前 order=${String(header.order)}`,
-  )
+  assert.deepEqual(registered.map(entry => entry.name), ['sidebar.footer.action', 'settings.section'])
+  assert.equal(registered[0].label, '重启应用')
+  assert.equal(registered[1].label(), '重启桌面应用')
+  for (const dispose of cleanups) dispose()
+  assert.deepEqual(removed, ['sidebar.footer.action', 'settings.section'])
 })
 
-await ok('左上角：注册进官方面板座位（同任务看板），行交给侧栏绘制', async () => {
-  const { plugin } = loadClientBundle()
-  const registered = []
-  const slots = {
-    inject: (name, fn) => { fn() },
-    register: (options) => {
-      registered.push(options)
-      return () => {}
-    },
-  }
-  plugin.apply({
-    get: (key) => (key === 'slots' ? slots : undefined),
-    effect: (fn) => fn(),
-  })
-  const panel = registered.find((entry) => entry.name === 'sidebar.panellist')
-  assert.ok(panel !== undefined, '必须注册到左上角的面板座位')
-  assert.equal(panel.id, 'dsh-desktop-restart')
-  assert.equal(typeof panel.order, 'number', '官方行按 order 排序')
-  assert.equal(typeof panel.label, 'function', '官方行用 label 画文字（任务看板传的也是函数）')
-  const main = registered.find((entry) => entry.name === 'main')
-  assert.ok(main !== undefined, '必须注册主区面板，否则点开是空的')
-  assert.equal(main.key, 'dsh-desktop-restart', 'main 是按 key 配对的面板')
-
-  const source = readFileSync(join(libDir, 'client.js'), 'utf8')
-  assert.match(source, /function PanelGlyph/u, '这个座位只提供图标组件')
-  assert.match(source, /variant: "primary"/u, '面板里的按钮用官方 Button 的 primary 变体')
-})
-
-await ok('插件开关：宿主 config 里的入口开关（缺省 true）', async () => {
-  assert.deepEqual(__test.readEntries({}), { panel: true, footer: true, header: true, command: true, settingsRow: true })
-  const off = __test.readEntries({ footer: false, command: false })
-  assert.equal(off.footer, false)
-  assert.equal(off.command, false)
-  assert.equal(off.panel, true, '没写的按 true')
-})
-
-await ok('插件开关：状态接口把默认开关给客户端', async () => {
+await ok('状态接口不再提供旧的多入口开关', async () => {
   const res = makeRes()
   await statusRoute.handler(makeReq('GET'), res)
-  const body = JSON.parse(res.body)
-  assert.ok(body.entries && typeof body.entries === 'object', '状态里要有 entries')
-  assert.equal(body.entries.footer, true)
-  assert.equal(typeof body.entries.header, 'boolean')
-})
-
-await ok('插件开关：本机保存的选择能真的关掉入口（并保留开关页）', async () => {
-  const store = new Map([['dsh-desktop-restart.entries', JSON.stringify({ footer: false })]])
-  const storage = {
-    getItem: (key) => (store.has(key) ? store.get(key) : null),
-    setItem: (key, value) => store.set(key, String(value)),
-    removeItem: (key) => store.delete(key),
-  }
-  const { plugin } = loadClientBundle({ storage })
-  const registered = []
-  const slots = {
-    inject: (name, fn) => {
-      fn()
-      return () => {}
-    },
-    register: (options) => {
-      registered.push(options)
-      return () => {}
-    },
-  }
-  plugin.apply({
-    get: (key) => (key === 'slots' ? slots : undefined),
-    effect: (fn) => fn(),
-  })
-  const names = registered.map((entry) => entry.name)
-  assert.ok(!names.includes('sidebar.footer.action'), '本地关掉的入口不该再注册')
-  assert.ok(names.includes('sidebar.panellist'), '没关的照旧注册')
-  assert.ok(names.includes('conversation.session.header.actions'))
-  assert.ok(names.includes('settings.general.item'))
-  assert.ok(names.includes('settings.section'), '开关页本身必须一直在，否则关掉就回不来了')
+  assert.equal(JSON.parse(res.body).entries, undefined)
 })
 
 await ok('插件开关：清理那一行读写的宿主设置，不是浏览器本地', async () => {
@@ -1614,20 +1444,13 @@ await ok('左侧边栏：注册进官方座位 sidebar.footer.action，照官方
   )
   assert.match(
     source,
-    /\.dshdr-foot\[data-rail=1\]\{width:36px;height:36px;margin:8px 0 10px\}/u,
+    /\.dshdr-foot\[data-rail='1'\]\{width:36px;height:36px;margin:8px 0 10px\}/u,
     '收起成 rail 时官方是 36×36、margin 8px 0 10px',
   )
   assert.match(
     source,
-    /\.dshdr-foot\[data-rail=1\] \.dshdr-foot-badge\{border-radius:50%;justify-content:center;gap:0;width:36px;height:36px;padding:0\}/u,
+    /\.dshdr-foot\[data-rail='1'\] \.dshdr-foot-badge\{border-radius:50%;justify-content:center;gap:0;width:36px;height:36px;padding:0\}/u,
     '收起成 rail 时官方是圆形',
-  )
-  // 同座位里 dsh-diff-approval 的条目也是整行宽 + flex:none；容器不允许换行时，
-  // 后注册的那个会被挤出容器、只露出一角（2026-10-09 实测）。
-  assert.match(
-    source,
-    /\[class\*=\\"footerActions\\"\]:has\(\.dshdr-foot\)\{flex-wrap:wrap !important\}/u,
-    '同座位多个整行条目时，容器必须允许换行，且只命中装着本插件这一行的容器',
   )
 })
 
@@ -2057,7 +1880,7 @@ await ok('文档：README 里写的冒烟测试数量与实际一致', async () 
   const expectedHere = total - (process.platform === 'win32' ? 0 : windowsOnly)
   assert.equal(passed + 1, expectedHere, 'README 写的数量与本平台实际不符：加了测试就要同步改文档')
   // 「仅 Windows」的声明也要对账 —— 非 Windows 平台上真能数出来；Windows 上
-  // 跑不到这条对账（skipped 恒为 0），由 CI 的 Linux 三档代为核对。
+  // 跑不到这条对账（skipped 恒为 0），由 CI 的 Linux 矩阵代为核对。
   if (process.platform !== 'win32') {
     assert.equal(skippedWindowsOnly, windowsOnly, 'README 声明的「仅 Windows」数量与实际跳过的用例数不符')
   }

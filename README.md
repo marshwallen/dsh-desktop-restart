@@ -1,8 +1,10 @@
-# dsh-desktop-restart
+# @marshwallen/dsh-desktop-restart
 
 **[English](README.en.md)** | 简体中文
 
-给 **DeepSeek Harness 桌面版（Electron）** 用的重启插件：**左侧边栏左上角**有一个「重启应用」入口（挂在官方给插件留的面板座位上 —— 那一行由侧栏自己绘制，所以外观就是官方的），**侧栏底部**还有一个入口，会话标题栏上还有一个按钮，另外还有 `/restart-desktop` 斜杠命令与 设置 → 通用 那一行。哪个入口要、哪个不要，都由设置里「重启桌面应用」那一栏自己决定。
+本包是 [luoshuizhiwei/dsh-desktop-restart](https://github.com/luoshuizhiwei/dsh-desktop-restart) 的修改版 fork，由 [marshwallen](https://github.com/marshwallen/dsh-desktop-restart) 维护，以 `@marshwallen/dsh-desktop-restart` 为独立包名。保留原作者署名及 MIT 许可证。
+
+给 **DeepSeek Harness 桌面版（Electron）** 用的重启插件：仅在**左侧边栏「更多」按钮下方**保留一个「重启应用」按钮。设置分区保留续跑、临时快照清理和界面偏好。
 
 除了重启，它还顺手管两件小事（在设置分区里归入同一个「**附带功能**」分类，都能关）：清掉 DSH 被硬杀时漏在系统 Temp 里的改动快照；把账号菜单里紧挨「设置」下面、容易误点的「意见反馈」藏起来。这两件与重启没有功能关系，只是搭本插件顺路发货。
 
@@ -62,7 +64,7 @@ DeepSeek Harness.exe            ← Electron 主进程：窗口、托盘、自�
 
 重启会打断正在跑的回合。借鉴市场同类插件（`dsh-smart-restart`）的做法，本插件补了两件善后：
 
-- **重启完成回执**：排程前写一份标记（`~/.dsh/desktop-restart/last-restart.json`，记下宿主 pid、时间、以及当时**哪些会话正在干活**）。新宿主发现 pid 变了就说明真的重启过，于是把「已于 HH:MM:SS 完成重启（停机 N 秒）」显示在主区面板和设置页那一行。（pid 相同是插件热重载，不算重启 —— 那种情况不会误报，也不会打扰任何会话。）
+- **重启完成回执**：排程前写一份标记（`~/.dsh/desktop-restart/last-restart.json`，记下宿主 pid、时间、以及当时**哪些会话正在干活**）。新宿主发现 pid 变了就说明真的重启过，于是把「已于 HH:MM:SS 完成重启（停机 N 秒）」显示在侧栏按钮的悬停提示与无障碍说明中。（pid 相同是插件热重载，不算重启 —— 那种情况不会误报，也不会打扰任何会话。）
 - **被打断的会话自动续跑**（默认关，需手动打开）：判据与守卫一致 —— 有正在跑的回合、或 inbox 里排着消息的会话。启动 12 秒后它们各收到一条用户消息：「重启完成：桌面应用已于 … 重启（停机约 N 秒）。如果有任务被打断，请从中断处继续。」**默认关闭**（2026-10-21 定）：它会额外消耗 token —— 被中断的会话会自动发起新回合接着做，所以必须由用户在 **设置 → 插件 → 重启桌面应用** 里自己打开（开关旁边的说明里也写着这一点）。打开即 `wake`（`agent.followup`，真的让会话继续干活）；想只把提示放进上下文、不起回合，可在 config 里写 `resume: 'notice'`。一次最多 8 个会话。
 
 这两件都依赖官方 `createUserMessage`（`@deepseek-ai/dsh-llm`）与 `SessionId`（`@deepseek-ai/dsh-session`）。它们在**装了 dsh CLI** 的机器上解析得到、只装桌面应用的机器上未必，所以一律**运行时按需加载**：取不到就跳过续跑并记一条日志，插件其余功能照常 —— 绝不因为缺这两个包而加载失败。回执不依赖它们，任何情况下都能显示。
@@ -74,7 +76,7 @@ DeepSeek Harness.exe            ← Electron 主进程：窗口、托盘、自�
 ### 从 npm
 
 ```sh
-dsh plugin add @luoshuizhiwei/dsh-desktop-restart
+dsh plugin add @marshwallen/dsh-desktop-restart
 ```
 
 ### 从源码
@@ -85,9 +87,9 @@ dsh plugin add @luoshuizhiwei/dsh-desktop-restart
 // ~/.dsh/profiles/desktop/package.json
 {
   "dependencies": {
-    "@luoshuizhiwei/dsh-desktop-restart": "link:../../local-plugins/dsh-desktop-restart"
+    "@marshwallen/dsh-desktop-restart": "link:../../local-plugins/dsh-desktop-restart"
   },
-  "dsh": { "profile": { "bundles": [ "...", "@luoshuizhiwei/dsh-desktop-restart" ] } }
+  "dsh": { "profile": { "bundles": [ "...", "@marshwallen/dsh-desktop-restart" ] } }
 }
 ```
 
@@ -97,45 +99,15 @@ dsh plugin add @luoshuizhiwei/dsh-desktop-restart
 
 ## 使用
 
-五个入口，都走同一条受守卫的路径：
+唯一重启入口是**左侧边栏「更多」下方的「重启应用」按钮**，展开和收起侧栏时均可使用。首次点击进入「确认重启？」状态，5 秒内再次点击才执行。
 
-1. **左侧边栏左上角的「重启应用」** —— 挂在官方给第三方插件的面板座位（`sidebar.panellist` + `main`），**那一行由侧栏自己绘制**，所以外观就是官方的；点一下会在主区打开重启面板，面板里再点「重启」；
-2. **左侧边栏底部的「重启应用」** —— 官方给第三方插件的动作座位（42px 动作行，侧栏收起时变 36×36 圆形），点两次即可重启；
-3. **会话标题栏按钮** —— 会话页抬头右侧那个刷新图标 + 「重启」；
-4. **斜杠命令** —— 在输入框里打 `/restart-desktop` 回车；
-5. **设置 → 通用 → 重启桌面应用** —— 备用入口。
+有任务在跑时，按钮弹出官方风险确认框，列出会打断的工作；勾选确认后才重启。插件安装或更新期间仍然硬拦，确认也无法绕过。无法加载官方组件时，使用内联警告和 0.9 秒冷却。
 
-按钮类入口是两步确认：第一次点击武装（`确认重启？`），5 秒内第二次点击才执行；斜杠命令直接执行。随后页面断开，应用重启，页面在新进程就绪后自行恢复。
+按钮使用官方 `sidebar.footer.action` 座位，展开时为 42px 动作行，收起时为 36×36 图标按钮。布局规则只作用于包含本插件的底部容器，将本插件按钮排在「更多」之后，其他插件仍在原来的位置。
 
-**有任务在跑时**：第二次点击不会立刻重启，而是弹出**官方的风险确认框**（警告 + 显式勾选 + 确认按钮，勾选前确认按钮不可用），写清会打断什么（`有任务在跑（2 项正在生成或运行工具、1 个后台任务在跑）`）。斜杠命令在同样情况下只回错误并提示 `/restart-desktop --force`。几个入口在挂载时也会把当前状态写在提示里，按之前就能看见。（万一拿不到官方组件，退回内联警告态 + 0.9 秒冷却。）
+顶部面板、会话标题栏、通用设置行和斜杠命令入口已移除。旧版 `panel`、`footer`、`header`、`settingsRow`、`command` 配置和本地入口偏好不再生效。`config.enabled: false` 仍可禁止重启。
 
-**界面语言**（2026-10-08 第三轮）：直接用**官方标准件**，不是照着画的。
-
-- **左上角那一条挂在官方的面板座位上**（`sidebar.panellist`，官方给第三方插件的面板座位）：插件只登记 `id / order / 文案` 和一个图标组件，**整行（按钮、tooltip、文字、active 态、收起态）都由侧栏自己绘制** —— 所以它不可能不像官方。点一下会把主区切到同名的 `main` 面板，面板里用官方 `Button`（primary）触发重启。
-- **主区那个面板按同座位（任务看板）的页面版式**：铺满主区高度、自带 `--dsw-alias-bg-base`、内边距 `14px 16px 16px`、标题 16px/700 与右上角状态词同一行、块间距 12px；说明、守卫警告、结果各成一枚圆角卡片。（2026-10-20 用户指出布局有问题：原先 32/24 内边距的 560px 窄栏浮在满高主区里，像一段文字飘在空白中。）
-- **左侧边栏底部那个入口挂在官方座位 `sidebar.footer.action` 上**（应用自己的插件面板也在那里），并照抄同座位占用者（官方插件面板 / `dsh-diff-approval`）的 42px 动作行：`height:42px`、`border-radius:12px`、`gap:8px`、`padding:0 10px 0 8px`、14px/22px、hover / active 加 `--dsw-alias-interactive-bg-hover` 底色；侧栏收起成 rail 时变 36×36 圆形（座位会把 `{ wide }` 传进来）。
-- 标题栏按钮照抄同一个座位里官方那个真实按钮（`ui-jobs` 的 `JobListAction`）：`min-height:28px`、`--dsw-radius-sm`、`padding:3px 2px`、`gap:3px`、`12px/18px`、字色 `--dsw-alias-label-tertiary`，hover / focus 只把字色提到 `--dsw-alias-label-secondary`（不加底色）；窄窗口 540px 以下只留图标。
-- 设置页按钮用官方 `Button`（`variant="ghost"`）；图标用官方 `IconRefreshOutlineRegular`（应用自己也是 size 14）；**会打断工作时的确认用官方 `RiskConfirmation`** —— 警告 + 显式勾选 + 确认按钮，勾选前确认按钮不可用。
-- 颜色语义用官方 token：普通确认只做中性强调，会打断工作是 `--dsw-alias-state-warn-primary`，失败才是 `--dsw-alias-state-error-primary`，成功是绿色；交接期间图标转圈（系统开了「减少动效」就不转）。
-- 官方组件在 `dsh.client.inject` 里声明后由加载器先注册再执行本插件；万一 DSH 改名或挪包导致 require 失败，会退回自己那份**逐字照抄官方数值**的样式，界面不会崩。
-
-完整对照（含官方逐字 CSS 与官方源码路径）见 `docs/official-ui-standard.md`。
-
-## 自己决定用哪些入口
-
-插件自带一个**设置分区**（设置里找到「重启插件」那一栏），里面四个开关 —— 改完**立即生效**，不用重启或刷新（同一个分区下面还有清理与隐藏两项，见后文）：
-
-| 开关 | 关掉之后 |
-| --- | --- |
-| 左上角的面板入口 | 侧栏左上角那一条消失（连带主区那个重启面板） |
-| 侧栏底部的入口 | 侧栏底部那一条消失 —— 它和同座位里别的插件条目可能挤在一起，真挤了就关这个 |
-| 会话标题栏按钮 | 会话页抬头右侧那个按钮消失 |
-| 设置 → 通用 那一行 | 通用设置页里的备用入口消失 |
-
-四个入口与斜杠命令**默认全开**（新用户装完就能在四处看到入口，随手点）；选择存在**本机浏览器**（`localStorage`）；**默认值**来自插件的 config —— 在
-`~/.dsh/profiles/<profile>/cordis.patch.yml` 里本插件那一行写
-`config: { panel: false, footer: false, header: false, settingsRow: false, command: false, enabled: false }`
-可以一次改掉默认值（`command` 是 `/restart-desktop` 斜杠命令，`enabled` 是总开关）。
+**设置 → 重启桌面应用**仅管理续跑与附带功能，不提供重启按钮和入口开关。
 
 ## 顺手清掉别人漏下的临时快照
 
@@ -260,7 +232,7 @@ failure notice dispatched to the user
 node scripts/smoke.mjs
 ```
 
-离线冒烟测试（119 项，其中 4 项仅 Windows）：宿主半用桩上下文加载，只验证路由守卫与全部拒绝路径；守卫的判据（任务快照、安装记录、进程存活、平台鉴权判定、拒绝文案、路径过滤、命令行分词、netstat 监听解析、等待判定）是纯函数，直接单测；孤儿快照的判定是纯函数（含「启动后才建」「启动后被写过」「太年轻」三个反例），删除本身在临时目录里真跑一遍；客户端那半校验包身份、注入写法、尺寸与配色对齐官方、颜色语义与无障碍属性；helper 走「映像名不匹配」「拉起来又立刻退出」「问不出进程表」「端口迟迟不放」四条分支（这四条依赖 tasklist / taskkill / where.exe，**仅在 Windows 上实测**，CI 的 Linux/macOS 跳过并计数；其余纯函数用例三平台全跑 —— 2026-10-20 CI 首跑 Linux 就靠这个抓出过一条把 Windows 行为写死成全平台事实的断言）。（最后一条用测试自己拉起的替身进程当 host、自己占住的端口当被占端口，且 `alertOnFailure: false` 不弹窗）。**它不会重启任何东西**，也不会碰真实的系统 Temp（清理相关的用例都把 `TMP`/`TEMP` 与 `DSH_HOME` 指向本次测试的临时目录），自己建的临时目录还会在退出时删干净（2026-10-09 之前每跑一次就往系统 Temp 里留 5 个空目录）。
+离线冒烟测试（111 项，其中 4 项仅 Windows）：宿主半用桩上下文加载，只验证路由守卫与全部拒绝路径；守卫的判据（任务快照、安装记录、进程存活、平台鉴权判定、拒绝文案、路径过滤、命令行分词、netstat 监听解析、等待判定）是纯函数，直接单测；孤儿快照的判定是纯函数（含「启动后才建」「启动后被写过」「太年轻」三个反例），删除本身在临时目录里真跑一遍；客户端那半校验包身份、注入写法、尺寸与配色对齐官方、颜色语义与无障碍属性；helper 走「映像名不匹配」「拉起来又立刻退出」「问不出进程表」「端口迟迟不放」四条分支（这四条依赖 tasklist / taskkill / where.exe，**仅在 Windows 上实测**，CI 的 Linux 跳过并计数；其余纯函数用例在 Linux/Windows 矩阵上全跑 —— 2026-10-20 CI 首跑 Linux 就靠这个抓出过一条把 Windows 行为写死成全平台事实的断言）。（最后一条用测试自己拉起的替身进程当 host、自己占住的端口当被占端口，且 `alertOnFailure: false` 不弹窗）。**它不会重启任何东西**，也不会碰真实的系统 Temp（清理相关的用例都把 `TMP`/`TEMP` 与 `DSH_HOME` 指向本次测试的临时目录），自己建的临时目录还会在退出时删干净（2026-10-09 之前每跑一次就往系统 Temp 里留 5 个空目录）。
 
 ## 语言
 
@@ -268,13 +240,11 @@ node scripts/smoke.mjs
 
 ## 发布
 
-发布走 CI 自动化（`.github/workflows/ci.yml`），**本机不存任何 npm 凭据**：
+Workflow 与 `dsh-plugin-codex-loop` 对齐：
 
-1. 普通提交 → CI 在 node 20/22/24 三档跑全部冒烟测试；
-2. **发布门（2026-10-20 起的约定）**：打 `v*` 标签**之前**，先把本次变化的内容给作者过目 —— 作者确认后才推标签。标签一旦推送即自动发布，所以这道人工门就是唯一的把关点，不允许跳过；
-3. 推送 `v*` 标签 → 三档测试通过后，publish 任务用 **OIDC Trusted Publishing** 直接发布到 npm（npm ≥ 11.5.1，无需令牌、无 OTP），公共仓库自动附带 provenance 溯源。
-
-一次性登记（已完成于 2026-10-20）：npmjs.com → 本包 → Settings → **Trusted Publisher** → GitHub Actions，填 owner `luoshuizhiwei`、repo `dsh-desktop-restart`、workflow `ci.yml`，**Allowed actions 勾上 `npm publish`**（默认只放行 staged publish，不勾的话直接发布会被拒）。注意两点（官方文档）：登记后 **2 天内**必须完成第一次成功发布，否则配置作废要重登；npm 保存时不校验表单，字段大小写必须与仓库完全一致。
+1. `.github/workflows/ci.yml` 在 `master` 推送和 PR 上运行 Linux/Windows × Node 22.19.0/24 矩阵，依次执行 `npm ci`、`npm run build`、`npm test`、`npm run smoke:archive`。
+2. `.github/workflows/release.yml` 在推送 `v*` 标签时运行同样的验证，并核对标签与 `package.json` 版本一致。
+3. 验证通过后打包 `.tgz` 并附到 GitHub Release，自动生成说明；带连字符的版本标记为预发布。此流程不再发布到 npm。
 
 ## 许可证
 

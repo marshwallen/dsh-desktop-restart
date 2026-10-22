@@ -1,8 +1,10 @@
-# dsh-desktop-restart
+# @marshwallen/dsh-desktop-restart
 
 English | **[简体中文](README.md)**
 
-A restart plugin for the **DeepSeek Harness desktop app (Electron)**. It adds a **"Restart Desktop App"** entry at the **top of the left sidebar** (mounted on the official panel slot for third-party plugins — the row itself is drawn by the sidebar, so it looks exactly native), another entry at the **bottom of the sidebar**, a button in the conversation header, a `/restart-desktop` slash command, and a row under Settings → General. Which entries exist is up to you — toggle them in the plugin's own settings section.
+This is a modified fork of [luoshuizhiwei/dsh-desktop-restart](https://github.com/luoshuizhiwei/dsh-desktop-restart), maintained by [marshwallen](https://github.com/marshwallen/dsh-desktop-restart) under the distinct package name `@marshwallen/dsh-desktop-restart`. Original author attribution and the MIT license are preserved.
+
+A restart plugin for the **DeepSeek Harness desktop app (Electron)** with a single **Restart** button **below More in the left sidebar**. Its settings section retains session resume, temporary snapshot cleanup, and interface preferences.
 
 Besides restarting, it also ships two small extras (grouped under one **"Bundled extras"** section in the settings, both optional): sweeping the change-snapshot directories DSH leaves behind in the system Temp folder when it is hard-killed, and hiding the easy-to-misclick "Feedback" item that sits right below "Settings" in the account menu. Neither is functionally related to restarting — they just ride along with this plugin.
 
@@ -58,7 +60,7 @@ The criterion is **whether the process is alive**, not whether the record file e
 
 A restart interrupts in-flight turns. Following the approach of a peer plugin (`dsh-smart-restart`), this plugin adds two pieces of aftercare:
 
-- **Restart receipt**: before scheduling, it writes a marker (`~/.dsh/desktop-restart/last-restart.json`) holding the host pid, the time, and **which sessions were doing work**. A new host that sees a different pid knows it is a genuine restart and shows "Restarted at HH:MM:SS (down Ns)" in the main-area panel and on the settings row. (The same pid means an in-process plugin reload — no false receipt, and no session is disturbed.)
+- **Restart receipt**: before scheduling, it writes a marker (`~/.dsh/desktop-restart/last-restart.json`) holding the host pid, the time, and **which sessions were doing work**. A new host that sees a different pid knows it is a genuine restart and shows "Restarted at HH:MM:SS (down Ns)" in the sidebar button tooltip and accessible description. (The same pid means an in-process plugin reload — no false receipt, and no session is disturbed.)
 - **Automatic resume of interrupted sessions** (off by default, opt-in): same criterion as the guards — sessions with a running turn or queued inbox messages. Twelve seconds after boot each of them receives a user message: "Restart finished: the desktop app restarted at … (down ~Ns). If a task was interrupted, continue from where it stopped." **Off by default** (decided 2026-10-21): it spends extra tokens — interrupted sessions start a new turn on their own, so the user has to switch it on in **Settings → Plugins → Restart Desktop App** (the row says so next to the switch). Switching it on means `wake` (`agent.followup`, the session really continues); for context-only delivery without starting a turn, set `resume: 'notice'` in config. At most 8 sessions per restart.
 
 Both depend on the official `createUserMessage` (`@deepseek-ai/dsh-llm`) and `SessionId` (`@deepseek-ai/dsh-session`). Those resolve on machines with the **dsh CLI** installed but not necessarily on desktop-only installs, so they are loaded **lazily at runtime**: when unavailable, resume is skipped with a log line and everything else keeps working — a missing package never breaks loading. The receipt does not depend on them and always shows.
@@ -70,7 +72,7 @@ Before launching the replacement instance the helper also strips three traces of
 ### From npm
 
 ```sh
-dsh plugin add @luoshuizhiwei/dsh-desktop-restart
+dsh plugin add @marshwallen/dsh-desktop-restart
 ```
 
 ### From source
@@ -81,9 +83,9 @@ The package lives at `~/.dsh/local-plugins/dsh-desktop-restart` and mounts via t
 // ~/.dsh/profiles/desktop/package.json
 {
   "dependencies": {
-    "@luoshuizhiwei/dsh-desktop-restart": "link:../../local-plugins/dsh-desktop-restart"
+    "@marshwallen/dsh-desktop-restart": "link:../../local-plugins/dsh-desktop-restart"
   },
-  "dsh": { "profile": { "bundles": [ "...", "@luoshuizhiwei/dsh-desktop-restart" ] } }
+  "dsh": { "profile": { "bundles": [ "...", "@marshwallen/dsh-desktop-restart" ] } }
 }
 ```
 
@@ -93,42 +95,15 @@ After installing, **restart the app once** to load it — that first restart has
 
 ## Usage
 
-Five entries, all through the same guarded path:
+The only restart entry is the **Restart button below More in the left sidebar**, available in both expanded and collapsed modes. Click once to arm it, then again within five seconds to restart.
 
-1. **"Restart App" at the top of the left sidebar** — mounted on the official panel slot for third-party plugins (`sidebar.panellist` + `main`); **the row is drawn by the sidebar itself**, so it looks native. Clicking opens the restart panel in the main area; click "Restart" there.
-2. **"Restart App" at the bottom of the sidebar** — the official action slot for third-party plugins (a 42px action row; 36×36 circle when the sidebar is collapsed). Click twice to restart.
-3. **Conversation header button** — the refresh icon + "Restart" at the right of the conversation header.
-4. **Slash command** — type `/restart-desktop` in the composer.
-5. **Settings → General → Restart Desktop App** — the fallback entry.
+When tasks are running, the official risk dialog lists the interrupted work and requires explicit acknowledgement. Plugin installations and updates still hard-block restart. If official components are unavailable, the button falls back to an inline warning with a 0.9-second cooldown.
 
-Button-style entries use a two-step confirm: the first click arms (`Restart now?`), a second click within 5 s executes; the slash command executes directly. The page then disconnects, the app restarts, and the page recovers once the new process is ready.
+The button occupies the official `sidebar.footer.action` slot: a 42px row when expanded, or a 36×36 icon button when collapsed. A scoped layout rule places this button after More while keeping other plugin actions in their original position.
 
-**When tasks are running**: the second click does not restart immediately — instead the **official risk-confirmation dialog** appears (warning + explicit checkbox + confirm button, disabled until checked), spelling out what would be interrupted (e.g. `2 agents generating or running tools, 1 background job running`). The slash command in the same situation just errors and hints `/restart-desktop --force`. Entries also surface the current state in their tooltips before you click. (If the official component is unavailable, it falls back to an inline warning state with a 0.9 s cooldown.)
+The top panel, conversation header, General settings row, and slash command have been removed. Legacy `panel`, `footer`, `header`, `settingsRow`, and `command` config values and local entry preferences no longer apply. `config.enabled: false` still disables restart.
 
-**The UI uses official components**, not lookalikes:
-
-- The sidebar panel row rides the official panel slot (`sidebar.panellist`): the plugin registers only `id / order / label` and an icon component — the **entire row is drawn by the sidebar**, so it cannot look off. Clicking switches the main area to the matching `main` panel, which triggers the restart with an official `Button` (primary).
-- The **main-area panel follows the page layout of its slot-mate** (the task board): it fills the main area's height, paints `--dsw-alias-bg-base`, uses `14px 16px 16px` padding, a 16px/700 title with a status word on the same row, 12px block gaps, and rounds the description, guard warning and result into separate cards. (Reported as a layout bug on 2026-10-20: it used to be a 560px column centred in a full-height area, reading like loose text floating in empty space.)
-- The sidebar-footer entry rides the official `sidebar.footer.action` slot (where the app's own plugin panel lives) and copies the 42px action row of its slot-mates verbatim; it becomes a 36×36 circle when the sidebar collapses to a rail (the slot passes `{ wide }`).
-- The header button copies the real button in that slot (`ui-jops`' `JobListAction`) measure for measure; below 540px window width only the icon remains.
-- Settings rows use the official `Button` (`variant="ghost"`); the icon is the official `IconRefreshOutlineRegular`; interruptions use the official `RiskConfirmation`.
-- Color semantics use official tokens: neutral for plain confirmation, `--dsw-alias-state-warn-primary` when work would be interrupted, error red only on failure; the icon spins during handoff (honoring reduced-motion).
-- Official components are declared in `dsh.client.inject`; should DSH rename or move a package, the plugin falls back to its own **measure-copied** styles instead of crashing.
-
-The full comparison (including the verbatim CSS and official source paths) is in `docs/official-ui-standard.md`.
-
-## Choosing your entries
-
-The plugin ships a **settings section** with four toggles — changes apply **immediately**, no restart or refresh (the same section also holds the two bundled extras below):
-
-| Toggle | Turning it off |
-| --- | --- |
-| Sidebar panel entry | the top-of-sidebar row disappears (and its main-area panel) |
-| Sidebar footer entry | the bottom-of-sidebar row disappears — it may crowd other plugins' rows in the same slot; turn this off if they collide |
-| Conversation header button | the header button disappears |
-| Settings → General row | the fallback row in General settings disappears |
-
-All four entries and the slash command are **on by default** (a fresh install shows the entry in all four places); choices are stored in the **local browser** (`localStorage`); **defaults** come from the plugin's config — in `~/.dsh/profiles/<profile>/cordis.patch.yml`, set `config: { panel: false, footer: false, header: false, settingsRow: false, command: false, enabled: false }` on this plugin's row to change them in one place (`command` is the `/restart-desktop` slash command; `enabled` is the master switch).
+**Settings → Restart Desktop App** contains resume and bundled extras, with no restart button or entry switches.
 
 ## Sweeping leftover change snapshots
 
@@ -253,7 +228,7 @@ failure notice dispatched to the user
 node scripts/smoke.mjs
 ```
 
-Offline smoke tests (119 checks, 4 of them Windows-only): the host half loads with a stub context, verifying route guards and every refusal path; guard criteria (task snapshots, install records, process liveness, platform-auth verdicts, refusal copy, path filters, command-line tokenizing, netstat listener parsing) are pure functions tested directly; the orphan-snapshot rule is a pure function (with the "created after start" / "written after start" / "too young" counterexamples) while the deletion itself runs for real in a temp directory; the client half checks bundle identity, injection style, measure-for-measure alignment with official UI, color semantics, and accessibility attributes; the helper exercises the "image name mismatch", "relaunch dies immediately", "process table unreadable", and "port won't free" branches (these four depend on tasklist / taskkill / where.exe and **run on Windows only** — CI's Linux/macOS skips and counts them; all other pure-function checks run on all three platforms — the first CI run on Linux caught an assertion that had hard-coded Windows behavior as universal). **The suite never restarts anything**, never touches the real system Temp (sweep cases point `TMP`/`TEMP` and `DSH_HOME` at test-local directories), and cleans up after itself.
+Offline smoke tests (111 checks, 4 of them Windows-only): the host half loads with a stub context, verifying route guards and every refusal path; guard criteria (task snapshots, install records, process liveness, platform-auth verdicts, refusal copy, path filters, command-line tokenizing, netstat listener parsing) are pure functions tested directly; the orphan-snapshot rule is a pure function (with the "created after start" / "written after start" / "too young" counterexamples) while the deletion itself runs for real in a temp directory; the client half checks bundle identity, injection style, measure-for-measure alignment with official UI, color semantics, and accessibility attributes; the helper exercises the "image name mismatch", "relaunch dies immediately", "process table unreadable", and "port won't free" branches (these four depend on tasklist / taskkill / where.exe and **run on Windows only** — CI's Linux jobs skip and count them; all other pure-function checks run across the Linux/Windows matrix — the first CI run on Linux caught an assertion that had hard-coded Windows behavior as universal). **The suite never restarts anything**, never touches the real system Temp (sweep cases point `TMP`/`TEMP` and `DSH_HOME` at test-local directories), and cleans up after itself.
 
 ## Language
 
@@ -261,13 +236,11 @@ UI copy goes through the official locale service (issue #1): the plugin register
 
 ## Releasing
 
-Releases are automated via CI (`.github/workflows/ci.yml`) with **no npm credentials stored locally**:
+Workflows follow `dsh-plugin-codex-loop`:
 
-1. Regular pushes → CI runs the full smoke suite on node 20/22/24;
-2. **Release gate (rule since 2026-10-20)**: before tagging `v*`, show the author what changed — the tag is pushed only after the author approves. Pushing the tag publishes automatically, so this human gate is the only checkpoint and may not be skipped;
-3. Push a `v*` tag → after the three-way tests pass, the publish job publishes to npm via **OIDC Trusted Publishing** (npm ≥ 11.5.1, no tokens, no OTP), with automatic provenance attestation for public repositories.
-
-One-time registration (done 2026-10-20): npmjs.com → this package → Settings → **Trusted Publisher** → GitHub Actions, with owner `luoshuizhiwei`, repo `dsh-desktop-restart`, workflow `ci.yml`, and **Allowed actions including `npm publish`** (the default allows only staged publish, and direct publishing would be refused without the checkbox). Two official-docs caveats: the first successful publish must happen **within 2 days** of registration or the configuration expires; npm does not validate the form on save — fields are case-sensitive and must match the repository exactly.
+1. `.github/workflows/ci.yml` runs on `master` pushes and PRs with Linux/Windows × Node 22.19.0/24, executing `npm ci`, `npm run build`, `npm test`, and `npm run smoke:archive`.
+2. `.github/workflows/release.yml` runs the same checks for `v*` tags and verifies that the tag matches the package version.
+3. The release job attaches the packed `.tgz` to a GitHub Release with generated notes. Versions containing a hyphen are marked as prereleases. This workflow no longer publishes to npm.
 
 ## License
 
